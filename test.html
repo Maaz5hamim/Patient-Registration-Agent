@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voice Agent Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; display: flex; justify-content: center; padding: 40px 16px; }
+  .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 32px; width: 100%; max-width: 520px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 24px; color: #fff; }
+  label { display: block; font-size: 12px; color: #888; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
+  input { width: 100%; background: #111; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; font-size: 14px; padding: 10px 12px; margin-bottom: 16px; outline: none; }
+  input:focus { border-color: #555; }
+  .row { display: flex; gap: 10px; margin-top: 8px; }
+  button { flex: 1; padding: 12px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: opacity .15s; }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  #connectBtn { background: #22c55e; color: #000; }
+  #disconnectBtn { background: #ef4444; color: #fff; }
+  .status-bar { margin-top: 20px; padding: 10px 14px; border-radius: 8px; font-size: 13px; background: #111; border: 1px solid #2a2a2a; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
+  .dot.connected { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+  .dot.error { background: #ef4444; }
+  .dot.speaking { background: #3b82f6; animation: pulse .8s infinite; }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
+  .log { margin-top: 16px; background: #111; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px; height: 220px; overflow-y: auto; font-size: 12px; font-family: monospace; }
+  .log-entry { padding: 3px 0; border-bottom: 1px solid #1e1e1e; color: #aaa; }
+  .log-entry.sent { color: #60a5fa; }
+  .log-entry.recv { color: #34d399; }
+  .log-entry.err  { color: #f87171; }
+  .log-entry.info { color: #fbbf24; }
+  .vol-wrap { margin-top: 16px; }
+  .vol-bar { height: 4px; background: #222; border-radius: 2px; overflow: hidden; margin-top: 6px; }
+  .vol-fill { height: 100%; background: #22c55e; width: 0%; transition: width .05s; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🎙 Voice Agent Test</h1>
+
+  <label>WebSocket URL</label>
+  <input id="wsUrl" value="ws://localhost:8765/ws" placeholder="ws://localhost:8765/ws or wss://xxxx.ngrok-free.app/ws">
+
+  <label>Caller Phone (sent as caller_phone parameter)</label>
+  <input id="callerPhone" value="+15551234567" placeholder="+15551234567">
+
+  <div class="row">
+    <button id="connectBtn">Connect &amp; Call</button>
+    <button id="disconnectBtn" disabled>Hang Up</button>
+  </div>
+
+  <div class="status-bar">
+    <div class="dot" id="dot"></div>
+    <span id="statusText">Disconnected</span>
+  </div>
+
+  <div class="vol-wrap">
+    <label>Mic Level</label>
+    <div class="vol-bar"><div class="vol-fill" id="volFill"></div></div>
+  </div>
+
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+// ─── µ-law codec (ITU-T G.711) ───────────────────────────────────────────────
+function linear2ulaw(sample) {
+  const BIAS = 0x84;
+  const sign = sample < 0 ? 0xFF : 0;
+  if (sample < 0) sample = -sample;
+  sample = Math.min(sample + BIAS, 32767);
+  let exp = 7;
+  for (let mask = 0x4000; (sample & mask) === 0 && exp > 0; exp--, mask >>= 1);
+  const mantissa = (sample >> (exp + 3)) & 0x0f;
+  return (~(sign | (exp << 4) | mantissa)) & 0xff;
+}
+
+function ulaw2linear(u) {
+  u = (~u) & 0xff;
+  const sign = u & 0x80;
+  const exp  = (u >> 4) & 0x07;
+  const mant = u & 0x0f;
+  let sample = ((mant << 3) + 0x84) << exp;
+  return sign ? 0x84 - sample : sample - 0x84;
+}
+
+function float32ToMulaw(f32) {
+  const out = new Uint8Array(f32.length);
+  for (let i = 0; i < f32.length; i++) {
+    const s16 = Math.max(-32768, Math.min(32767, f32[i] * 32768));
+    out[i] = linear2ulaw(s16);
+  }
+  return out;
+}
+
+function mulawToFloat32(bytes) {
+  const out = new Float32Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) {
+    out[i] = ulaw2linear(bytes[i]) / 32768;
+  }
+  return out;
+}
+
+function toBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+function fromBase64(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// ─── UI helpers ──────────────────────────────────────────────────────────────
+const $log   = document.getElementById('log');
+const $dot   = document.getElementById('dot');
+const $status = document.getElementById('statusText');
+const $vol   = document.getElementById('volFill');
+
+function log(msg, cls = '') {
+  const el = document.createElement('div');
+  el.className = 'log-entry ' + cls;
+  el.textContent = new Date().toLocaleTimeString() + ' ' + msg;
+  $log.appendChild(el);
+  $log.scrollTop = $log.scrollHeight;
+}
+
+function setStatus(text, dotClass) {
+  $status.textContent = text;
+  $dot.className = 'dot ' + dotClass;
+}
+
+// ─── State ───────────────────────────────────────────────────────────────────
+let ws, audioCtx, micStream, scriptNode, playbackQueue = [], isPlaying = false;
+const SAMPLE_RATE = 8000;
+const STREAM_SID  = 'MZ' + Math.random().toString(36).slice(2, 18).toUpperCase();
+const CALL_SID    = 'CA' + Math.random().toString(36).slice(2, 18).toUpperCase();
+let seqNum = 1;
+
+// ─── Playback (µ-law chunks → speaker) ───────────────────────────────────────
+function schedulePlayback() {
+  if (isPlaying || playbackQueue.length === 0) return;
+  isPlaying = true;
+  const chunk = playbackQueue.shift();
+  const float32 = mulawToFloat32(chunk);
+  const buf = audioCtx.createBuffer(1, float32.length, SAMPLE_RATE);
+  buf.copyToChannel(float32, 0);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);
+  src.onended = () => { isPlaying = false; schedulePlayback(); };
+  src.start();
+  setStatus('Agent speaking…', 'speaking');
+}
+
+// ─── Connect ─────────────────────────────────────────────────────────────────
+async function connect() {
+  const url   = document.getElementById('wsUrl').value.trim();
+  const phone = document.getElementById('callerPhone').value.trim();
+
+  document.getElementById('connectBtn').disabled = true;
+  document.getElementById('disconnectBtn').disabled = false;
+  setStatus('Connecting…', '');
+  log('Connecting to ' + url, 'info');
+
+  // Audio context at 8 kHz (matches Twilio's format)
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+
+  // Microphone
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    log('Mic error: ' + e.message, 'err');
+    disconnect(); return;
+  }
+
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    setStatus('Connected — sending handshake', 'connected');
+    log('WebSocket open', 'info');
+
+    // 1. connected event
+    const connEvent = { event: 'connected', protocol: 'Call', version: '1.0.0' };
+    ws.send(JSON.stringify(connEvent));
+    log('→ connected', 'sent');
+
+    // 2. start event
+    const startEvent = {
+      event: 'start',
+      sequenceNumber: String(seqNum++),
+      start: {
+        streamSid: STREAM_SID,
+        accountSid: 'AC00000000000000000000000000000000',
+        callSid: CALL_SID,
+        tracks: ['inbound'],
+        mediaFormat: { encoding: 'audio/x-mulaw', sampleRate: 8000, channels: 1 },
+        customParameters: { caller_phone: phone }
+      },
+      streamSid: STREAM_SID
+    };
+    ws.send(JSON.stringify(startEvent));
+    log('→ start (caller_phone=' + phone + ')', 'sent');
+
+    startMic();
+    setStatus('Call active — speak now', 'connected');
+  };
+
+  ws.onmessage = (evt) => {
+    let msg;
+    try { msg = JSON.parse(typeof evt.data === 'string' ? evt.data : new TextDecoder().decode(evt.data)); }
+    catch { return; }
+
+    if (msg.event === 'media' && msg.media?.payload) {
+      const bytes = fromBase64(msg.media.payload);
+      playbackQueue.push(bytes);
+      schedulePlayback();
+      log('← media (' + bytes.length + ' bytes)', 'recv');
+    } else if (msg.event === 'mark') {
+      log('← mark: ' + JSON.stringify(msg.mark), 'recv');
+    } else if (msg.event === 'clear') {
+      playbackQueue = [];
+      log('← clear', 'recv');
+    } else {
+      log('← ' + (msg.event || JSON.stringify(msg)), 'recv');
+    }
+  };
+
+  ws.onerror = (e) => { log('WebSocket error', 'err'); setStatus('Error', 'error'); };
+  ws.onclose = () => { log('WebSocket closed', 'info'); disconnect(); };
+}
+
+// ─── Microphone → send media events ──────────────────────────────────────────
+function startMic() {
+  const src = audioCtx.createMediaStreamSource(micStream);
+  scriptNode = audioCtx.createScriptProcessor(512, 1, 1);
+
+  scriptNode.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const f32 = e.inputBuffer.getChannelData(0);
+
+    // Volume meter
+    let sum = 0;
+    for (let i = 0; i < f32.length; i++) sum += f32[i] * f32[i];
+    const rms = Math.sqrt(sum / f32.length);
+    $vol.style.width = Math.min(100, rms * 600) + '%';
+
+    const mulaw = float32ToMulaw(f32);
+    const mediaEvent = {
+      event: 'media',
+      sequenceNumber: String(seqNum++),
+      media: { track: 'inbound', chunk: String(seqNum), timestamp: String(Date.now()), payload: toBase64(mulaw) },
+      streamSid: STREAM_SID
+    };
+    ws.send(JSON.stringify(mediaEvent));
+  };
+
+  src.connect(scriptNode);
+  scriptNode.connect(audioCtx.destination);
+}
+
+// ─── Disconnect ───────────────────────────────────────────────────────────────
+function disconnect() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const stopEvent = { event: 'stop', sequenceNumber: String(seqNum++), stop: { accountSid: 'AC00000000000000000000000000000000', callSid: CALL_SID }, streamSid: STREAM_SID };
+    ws.send(JSON.stringify(stopEvent));
+    ws.close();
+  }
+  if (scriptNode) { scriptNode.disconnect(); scriptNode = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  playbackQueue = []; isPlaying = false;
+  document.getElementById('connectBtn').disabled = false;
+  document.getElementById('disconnectBtn').disabled = true;
+  $vol.style.width = '0%';
+  setStatus('Disconnected', '');
+  log('Call ended', 'info');
+}
+
+document.getElementById('connectBtn').addEventListener('click', connect);
+document.getElementById('disconnectBtn').addEventListener('click', disconnect);
+</script>
+</body>
+</html>

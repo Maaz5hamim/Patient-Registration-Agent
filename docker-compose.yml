@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      API_KEY: ${BACKEND_API_KEY}
+    env_file:
+      - .env
+
+  agent:
+    build: ./agent
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      BACKEND_URL: http://backend:8000
+      BACKEND_API_KEY: ${BACKEND_API_KEY}
+      PORT: "8765"
+    depends_on:
+      backend:
+        condition: service_started
+    env_file:
+      - .env

@@ -1,0 +1,464 @@
+{
+  "info": {
+    "name": "Patient Intake API",
+    "_postman_id": "c3f8a1d2-b047-4e9a-9c6e-0f3e8a2b1d57",
+    "description": "Full test suite for the Patient Intake API.\n\n**Quick start**\n1. Set the `apiKey` collection variable to match your `BACKEND_API_KEY` in `.env`.\n2. Run requests top-to-bottom — **Create Patient** auto-sets `patientId` for all downstream calls.\n3. Run the full folder as a Collection Runner to verify the happy path end-to-end.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "Change to your deployed URL when testing in staging/prod."
+    },
+    {
+      "key": "apiKey",
+      "value": "replace-with-a-long-random-secret",
+      "type": "string",
+      "description": "Must match BACKEND_API_KEY in .env"
+    },
+    {
+      "key": "patientId",
+      "value": "",
+      "type": "string",
+      "description": "Auto-populated by the Create Patient test script."
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verify the server is up and the envelope shape is correct."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope shape', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b).to.have.property('data');",
+                  "    pm.expect(b.data.status).to.eql('ok');",
+                  "    pm.expect(b.error).to.be.null;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Patients",
+      "item": [
+        {
+          "name": "Create Patient",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Jane\",\n  \"last_name\": \"Doe\",\n  \"date_of_birth\": \"03/15/1990\",\n  \"sex\": \"Female\",\n  \"phone_number\": \"555-867-5309\",\n  \"email\": \"jane.doe@example.com\",\n  \"address_line_1\": \"123 Main Street\",\n  \"address_line_2\": \"Apt 4B\",\n  \"city\": \"Austin\",\n  \"state\": \"TX\",\n  \"zip_code\": \"78701\",\n  \"insurance_provider\": \"Blue Cross Blue Shield\",\n  \"insurance_member_id\": \"BCBS123456\",\n  \"preferred_language\": \"English\",\n  \"emergency_contact_name\": \"John Doe\",\n  \"emergency_contact_phone\": \"5558675310\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/patients/",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", ""]
+            },
+            "description": "Creates a new patient. The test script captures `patient_id` into the `patientId` collection variable for all downstream requests."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope shape', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b).to.have.property('data');",
+                  "    pm.expect(b.error).to.be.null;",
+                  "});",
+                  "pm.test('Returns patient_id UUID', () => {",
+                  "    const id = pm.response.json().data.patient_id;",
+                  "    pm.expect(id).to.match(/^[0-9a-f-]{36}$/i);",
+                  "    pm.collectionVariables.set('patientId', id);",
+                  "    console.log('patientId set to', id);",
+                  "});",
+                  "pm.test('verified_status starts false', () => {",
+                  "    pm.expect(pm.response.json().data.verified_status).to.be.false;",
+                  "});",
+                  "pm.test('date_of_birth stored correctly', () => {",
+                  "    pm.expect(pm.response.json().data.date_of_birth).to.eql('1990-03-15');",
+                  "});",
+                  "pm.test('phone normalised to 10 digits', () => {",
+                  "    pm.expect(pm.response.json().data.phone_number).to.eql('5558675309');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Patient — validation errors",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"J4ne!\",\n  \"last_name\": \"\",\n  \"date_of_birth\": \"13/40/2099\",\n  \"sex\": \"Unknown\",\n  \"phone_number\": \"123\",\n  \"address_line_1\": \"123 Main St\",\n  \"city\": \"Austin\",\n  \"state\": \"ZZ\",\n  \"zip_code\": \"ABCDE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/patients/",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", ""]
+            },
+            "description": "Sends intentionally bad data — expects 422 with a non-null error message."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Error message present, data null', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.data).to.be.null;",
+                  "    pm.expect(b.error).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Patients",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/patients/",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", ""],
+              "query": [
+                { "key": "last_name",      "value": "Doe",        "disabled": true, "description": "Partial case-insensitive match" },
+                { "key": "date_of_birth",  "value": "03/15/1990", "disabled": true, "description": "Exact match, MM/DD/YYYY" },
+                { "key": "phone_number",   "value": "555-867-5309","disabled": true, "description": "Any U.S. format, auto-normalised" }
+              ]
+            },
+            "description": "Returns all non-deleted patients. Enable individual query params to filter. Sorted by created_at desc."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope shape', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.data).to.be.an('array');",
+                  "    pm.expect(b.error).to.be.null;",
+                  "});",
+                  "pm.test('At least one patient returned', () => {",
+                  "    pm.expect(pm.response.json().data.length).to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Patients — filter by last_name",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/patients/?last_name=doe",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", ""],
+              "query": [
+                { "key": "last_name", "value": "doe" }
+              ]
+            },
+            "description": "Case-insensitive partial match — 'doe' should match 'Doe'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('All results have matching last name', () => {",
+                  "    pm.response.json().data.forEach(p => {",
+                  "        pm.expect(p.last_name.toLowerCase()).to.include('doe');",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Patient",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/patients/{{patientId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", "{{patientId}}"]
+            },
+            "description": "Fetch the patient created by 'Create Patient'. Uses the `patientId` collection variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Correct patient returned', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d.patient_id).to.eql(pm.collectionVariables.get('patientId'));",
+                  "    pm.expect(d.first_name).to.eql('Jane');",
+                  "    pm.expect(d.last_name).to.eql('Doe');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Patient — 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/patients/00000000-0000-0000-0000-000000000000",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", "00000000-0000-0000-0000-000000000000"]
+            },
+            "description": "Non-existent patient_id — expects 404 with envelope error."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Error in envelope', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.data).to.be.null;",
+                  "    pm.expect(b.error).to.include('not found');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Patient (partial)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address_line_1\": \"456 Oak Avenue\",\n  \"city\": \"Dallas\",\n  \"state\": \"TX\",\n  \"zip_code\": \"75201\",\n  \"insurance_provider\": \"Aetna\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/patients/{{patientId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", "{{patientId}}"]
+            },
+            "description": "Partial update — only the five provided fields are changed. All others remain untouched."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Updated fields reflect new values', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d.address_line_1).to.eql('456 Oak Avenue');",
+                  "    pm.expect(d.city).to.eql('Dallas');",
+                  "    pm.expect(d.insurance_provider).to.eql('Aetna');",
+                  "});",
+                  "pm.test('Unchanged fields untouched', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d.first_name).to.eql('Jane');",
+                  "    pm.expect(d.email).to.eql('jane.doe@example.com');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Patient",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"verified_status\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/patients/{{patientId}}/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", "{{patientId}}", "verify"]
+            },
+            "description": "Internal endpoint called by the voice agent after the caller confirms their details. Sets verified_status to true."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('verified_status is now true', () => {",
+                  "    pm.expect(pm.response.json().data.verified_status).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Patient (soft)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/patients/{{patientId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", "{{patientId}}"]
+            },
+            "description": "Soft-delete: sets deleted_at timestamp. The record still exists in MongoDB but is excluded from all future reads."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('deleted flag and timestamp present', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d.deleted).to.be.true;",
+                  "    pm.expect(d.deleted_at).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Patient — 404 after soft-delete",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/patients/{{patientId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", "{{patientId}}"]
+            },
+            "description": "Confirms the soft-deleted patient is invisible to the API — must return 404, not the record."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404 — record is soft-deleted', () => pm.response.to.have.status(404));",
+                  "pm.test('Error in envelope', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.data).to.be.null;",
+                  "    pm.expect(b.error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unauthorized — missing API key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/patients/",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients", ""]
+            },
+            "description": "Omits the X-API-Key header — must return 403 with the envelope error shape."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Error in envelope, data null', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.data).to.be.null;",
+                  "    pm.expect(b.error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+# Core agent framework
+pipecat-ai[websocket,silero,deepgram,openai]==1.11.0
+
+# Web server
+fastapi>=0.115
+uvicorn[standard]>=0.34
+python-multipart>=0.0.9
+
+# HTTP client (backend calls)
+httpx>=0.28.0
+
+# Telephony + SMS (Telnyx via httpx — no extra SDK needed)
+
+# Config
+python-dotenv>=1.0
+
+
+
+
