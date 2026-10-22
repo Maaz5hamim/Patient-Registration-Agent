@@ -46,7 +46,7 @@ from tools import (
 load_dotenv(override=True)
 
 logger.remove()
-logger.add(sys.stdout, level="DEBUG")
+logger.add(sys.stdout, level="INFO")
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
